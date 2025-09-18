@@ -44,7 +44,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>English Vocabulary Quiz with Tureng</title>
     <!-- Supabase JavaScript SDK -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -217,7 +217,19 @@
         // Supabase istemci başlatma
         const supabaseUrl = 'https://otklktvfvbgozfvacxid.supabase.co'; // Örn: https://xyz.supabase.co
         const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90a2xrdHZmdmJnb3pmdmFjeGlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgxODQ4NDUsImV4cCI6MjA3Mzc2MDg0NX0.78l8yQOOPlgXMogYmu3p3MK_2gReG7gvg6LK4UNtthQ'; // Örn: eyJ...
-        const supabase = Supabase.createClient(supabaseUrl, supabaseKey);
+        let supabaseClient = null;
+        if (typeof supabase === 'undefined') {
+            console.error('Supabase SDK failed to load. Check CDN or internet connection.');
+            alert('Supabase SDK failed to load. Please check your internet connection or CDN URL.');
+        } else {
+            try {
+                supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+                console.log('Supabase client initialized successfully.');
+            } catch (error) {
+                console.error('Error initializing Supabase client:', error);
+                alert('Error initializing Supabase: Check URL and Anon Key.');
+            }
+        }
 
         let vocabulary = [];
         let currentQuestion = null;
@@ -236,21 +248,25 @@
 
         // Verileri Supabase'den yükle
         async function loadData() {
+            if (!supabaseClient) {
+                alert('Supabase client not initialized. Check Supabase configuration.');
+                return;
+            }
             try {
-                const { data, error } = await supabase
+                const { data, error } = await supabaseClient
                     .from('users')
                     .select('*')
                     .eq('user_id', userId);
                 if (error) {
                     console.error('Error loading data:', error);
-                    alert('Error loading data. Check Supabase config.');
+                    alert('Error loading data: ' + error.message);
                     return;
                 }
                 if (data.length > 0) {
                     vocabulary = data[0].vocabulary || [];
                     password = data[0].password || '8006';
                 } else {
-                    await supabase.from('users').insert([
+                    await supabaseClient.from('users').insert([
                         { user_id: userId, password: '8006', vocabulary: [] }
                     ]);
                     password = '8006';
@@ -272,8 +288,12 @@
 
         // Verileri Supabase'e kaydet
         async function saveData() {
+            if (!supabaseClient) {
+                console.error('Supabase client not initialized.');
+                return;
+            }
             try {
-                const { error } = await supabase
+                const { error } = await supabaseClient
                     .from('users')
                     .upsert([
                         { user_id: userId, password: password, vocabulary: vocabulary }
