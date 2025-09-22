@@ -42,7 +42,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>English Vocabulary Quiz with Tureng</title>
+    <title>English Vocabulary</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
     <style>
         body {
@@ -166,7 +166,7 @@
         <button onclick="signIn()">Login</button>
     </div>
     <div id="mainSection" style="display:none;">
-        <h1>English Vocabulary Quiz</h1>
+        
         <div id="quizSection" style="display:none;">
             <h3 id="question"></h3>
             <button class="option" onclick="checkAnswer(0)"></button>
@@ -706,7 +706,7 @@
             const options = getRandomMeanings(currentQuestion.meaning);
             correctAnswerIndex = Math.floor(Math.random() * 4);
             options.splice(correctAnswerIndex, 0, currentQuestion.meaning);
-            document.getElementById('question').textContent = `What is the meaning of "${currentQuestion.word}"?`;
+            document.getElementById('question').textContent = `${currentQuestion.word}`;document.getElementById('question').style.fontWeight = 'bold';document.getElementById('question').style.fontSize = '40px';
             const optionButtons = document.getElementsByClassName('option');
             for (let i = 0; i < optionButtons.length; i++) {
                 optionButtons[i].textContent = options[i].toLowerCase();
@@ -726,7 +726,7 @@
                 currentQuestion.incorrect += 1;
             }
             saveData();
-            setTimeout(nextQuestion, 1500);
+            setTimeout(nextQuestion, 2000);
         }
 
         window.onload = async () => {
