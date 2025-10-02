@@ -1,43 +1,4 @@
-<script type="text/javascript">
-        var gk_isXlsx = false;
-        var gk_xlsxFileLookup = {};
-        var gk_fileData = {};
-        function filledCell(cell) {
-          return cell !== '' && cell != null;
-        }
-        function loadFileData(filename) {
-        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
-            try {
-                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
-                var firstSheetName = workbook.SheetNames[0];
-                var worksheet = workbook.Sheets[firstSheetName];
-
-                // Convert sheet to JSON to filter blank rows
-                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
-                // Filter out blank rows (rows where all cells are empty, null, or undefined)
-                var filteredData = jsonData.filter(row => row.some(filledCell));
-
-                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
-                var headerRowIndex = filteredData.findIndex((row, index) =>
-                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
-                );
-                // Fallback
-                if (headerRowIndex === -1 || headerRowIndex > 25) {
-                  headerRowIndex = 0;
-                }
-
-                // Convert filtered JSON back to CSV
-                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
-                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
-                return csv;
-            } catch (e) {
-                console.error(e);
-                return "";
-            }
-        }
-        return gk_fileData[filename] || "";
-        }
-        </script><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -341,11 +302,17 @@
                     ]);
                     password = '8006';
                 }
-                vocabulary = vocabulary.map(word => ({
-                    ...word,
-                    correct: word.correct || 0,
-                    incorrect: word.incorrect || 0
-                }));
+                vocabulary = vocabulary.map(word => {
+                    const correct = word.correct || 0;
+                    const incorrect = word.incorrect || 0;
+                    const usage = word.usage || (correct + incorrect); // Retroaktif hesaplama: Mevcut verilerde usage yoksa correct + incorrect olarak ayarla
+                    return {
+                        ...word,
+                        correct,
+                        incorrect,
+                        usage
+                    };
+                });
                 if (vocabulary.length > 0) {
                     document.getElementById('quizSection').style.display = 'block';
                     nextQuestion();
@@ -431,7 +398,8 @@
                 vocabulary = vocabulary.map(word => ({
                     ...word,
                     correct: 0,
-                    incorrect: 0
+                    incorrect: 0,
+                    usage: 0
                 }));
                 saveData();
                 showEditSection();
@@ -450,7 +418,7 @@
                 row.innerHTML = `
                     <td><input type="text" value="${item.word}" data-index="${vocabulary.findIndex(v => v.word === item.word)}" class="edit-word"></td>
                     <td><input type="text" value="${item.meaning}" data-index="${vocabulary.findIndex(v => v.word === item.word)}" class="edit-meaning"></td>
-                    <td>Correct: ${item.correct}, Incorrect: ${item.incorrect}</td>
+                    <td>Correct: ${item.correct}, Incorrect: ${item.incorrect}, Usage: ${item.usage}</td>
                     <td>
                         <button class="resetButton" onclick="resetScores(${vocabulary.findIndex(v => v.word === item.word)})">Reset Scores</button>
                         <button class="removeButton" onclick="removeWord(${vocabulary.findIndex(v => v.word === item.word)})">Remove from List</button>
@@ -476,6 +444,7 @@
             if (confirm('Are you sure you want to reset scores for this word?')) {
                 vocabulary[index].correct = 0;
                 vocabulary[index].incorrect = 0;
+                vocabulary[index].usage = 0;
                 saveData();
                 showEditSection();
                 alert('Scores reset.');
@@ -504,7 +473,8 @@
                         word,
                         meaning,
                         correct: vocabulary[i].correct || 0,
-                        incorrect: vocabulary[i].incorrect || 0
+                        incorrect: vocabulary[i].incorrect || 0,
+                        usage: vocabulary[i].usage || 0
                     });
                 }
             }
@@ -584,7 +554,7 @@
                 if (meaning.includes('Meaning not found')) {
                     errorWords.push(word);
                 } else {
-                    vocabulary.push({ word, meaning, correct: 0, incorrect: 0 });
+                    vocabulary.push({ word, meaning, correct: 0, incorrect: 0, usage: 0 });
                     addedCount++;
                 }
             }
@@ -642,7 +612,8 @@
                             word: item.word,
                             meaning: item.meaning.toLowerCase().replace(/[^a-zçğıöşü\s',]/g, ''),
                             correct: item.correct || 0,
-                            incorrect: item.incorrect || 0
+                            incorrect: item.incorrect || 0,
+                            usage: item.usage || ( (item.correct || 0) + (item.incorrect || 0) )
                         });
                         addedCount++;
                     }
@@ -684,16 +655,35 @@
 
         function getWeightedRandomWord() {
             const weights = vocabulary.map(word => {
-                const score = word.incorrect + 1;
-                return Math.max(1, score - word.correct);
+                // Temel: Yanlışlar ağırlığı artırır
+                let baseWeight = Math.max(1, (word.incorrect + 1) - word.correct);
+                
+                // Yeni: Hiç sorulmamışları (usage=0) ekstra boost ver (x10)
+                if (word.usage === 0) {
+                    baseWeight *= 10;  // Liste büyüklüğüne göre ayarla (küçükse x5-20)
+                } else {
+                    // Ekstra: Düşük başarı oranını cezalandır
+                    const successRate = word.usage > 0 ? word.correct / word.usage : 0;
+                    if (successRate < 0.7) {  // %70'den düşükse ekstra ağırlık
+                        baseWeight *= (1 + (1 - successRate));  // Örn: %50 başarı -> x1.5 boost
+                    }
+                }
+                
+                return Math.max(1, baseWeight);  // Minimum 1
             });
+            
             const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
             let random = Math.random() * totalWeight;
             for (let i = 0; i < vocabulary.length; i++) {
                 random -= weights[i];
-                if (random <= 0) return vocabulary[i];
+                if (random <= 0) {
+                    vocabulary[i].usage++;  // Seçilince usage artır
+                    return vocabulary[i];
+                }
             }
-            return vocabulary[vocabulary.length - 1];
+            const last = vocabulary[vocabulary.length - 1];
+            last.usage++;
+            return last;
         }
 
         function nextQuestion() {
@@ -706,7 +696,9 @@
             const options = getRandomMeanings(currentQuestion.meaning);
             correctAnswerIndex = Math.floor(Math.random() * 4);
             options.splice(correctAnswerIndex, 0, currentQuestion.meaning);
-            document.getElementById('question').textContent = `${currentQuestion.word}`;document.getElementById('question').style.fontWeight = 'bold';document.getElementById('question').style.fontSize = '40px';
+            document.getElementById('question').textContent = `${currentQuestion.word}`;
+            document.getElementById('question').style.fontWeight = 'bold';
+            document.getElementById('question').style.fontSize = '40px';
             const optionButtons = document.getElementsByClassName('option');
             for (let i = 0; i < optionButtons.length; i++) {
                 optionButtons[i].textContent = options[i].toLowerCase();
@@ -725,6 +717,7 @@
                 resultDiv.style.color = 'red';
                 currentQuestion.incorrect += 1;
             }
+            // Usage zaten nextQuestion'da artırıldığı için burada artırmıyoruz (toplam = correct + incorrect kalır)
             saveData();
             setTimeout(nextQuestion, 2000);
         }
