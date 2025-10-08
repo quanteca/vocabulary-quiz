@@ -131,7 +131,6 @@
         <button onclick="signIn()">Login</button>
     </div>
     <div id="mainSection" style="display:none;">
-        
         <div id="quizSection" style="display:none;">
             <h3 id="question"></h3>
             <button class="option" onclick="checkAnswer(0)"></button>
@@ -220,7 +219,7 @@
         let currentAction = null;
         let password = '';
         let currentStreak = 0;
-        let recordStreak = parseInt(localStorage.getItem('recordStreak')) || 0;
+        let recordStreak = 0;
 
         async function getCurrentUserId() {
             if (!supabaseClient) {
@@ -285,10 +284,12 @@
                 const { error } = await supabaseClient.auth.signOut();
                 if (error) throw error;
                 currentUserId = null;
-                document.getElementById('mainSection').style.display = 'none';
-                document.getElementById('authSection').style.display = 'block';
                 vocabulary = [];
                 password = '';
+                currentStreak = 0;
+                recordStreak = 0;
+                document.getElementById('mainSection').style.display = 'none';
+                document.getElementById('authSection').style.display = 'block';
                 alert('Logged out.');
             } catch (error) {
                 console.error('Sign-out error:', error.message);
@@ -311,11 +312,13 @@
                 if (data.length > 0) {
                     vocabulary = data[0].vocabulary || [];
                     password = data[0].password || '8006';
+                    recordStreak = data[0].recordStreak || 0;
                 } else {
                     await supabaseClient.from('vocabulary').insert([
-                        { user_id: userId, password: '8006', vocabulary: [] }
+                        { user_id: userId, password: '8006', vocabulary: [], recordStreak: 0 }
                     ]);
                     password = '8006';
+                    recordStreak = 0;
                 }
                 vocabulary = vocabulary.map(word => ({
                     ...word,
@@ -354,7 +357,7 @@
                 const { error } = await supabaseClient
                     .from('vocabulary')
                     .upsert([
-                        { user_id: userId, password: password, vocabulary: vocabulary }
+                        { user_id: userId, password: password, vocabulary: vocabulary, recordStreak: recordStreak }
                     ], { onConflict: 'user_id' });
                 if (error) {
                     console.error('Upsert error:', error);
@@ -671,15 +674,34 @@
         }
 
         function getWeightedRandomWord() {
+            // Önce hiç sorulmamış kelimeleri kontrol et (correct=0, incorrect=0)
+            const untestedWords = vocabulary.filter(word => word.correct === 0 && word.incorrect === 0);
+            if (untestedWords.length > 0) {
+                const randomIndex = Math.floor(Math.random() * untestedWords.length);
+                return untestedWords[randomIndex];
+            }
+
+            // Ağırlık hesaplama: Yanlış cevaplar ve düşük başarı oranı öncelikli
             const weights = vocabulary.map(word => {
-                const score = word.incorrect + 1;
-                return Math.max(1, score - word.correct);
+                let baseWeight = Math.max(1, (word.incorrect + 1) - word.correct);
+                const totalAttempts = word.correct + word.incorrect;
+                const successRate = totalAttempts > 0 ? word.correct / totalAttempts : 0;
+                if (totalAttempts > 0 && successRate < 0.7) {
+                    baseWeight *= (1 + (1 - successRate) * 2); // Başarı %70'ten düşükse boost
+                }
+                if (totalAttempts > 20) {
+                    baseWeight *= 0.5; // Çok test edilmiş kelimelere ceza
+                }
+                return Math.max(1, baseWeight);
             });
+
             const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
             let random = Math.random() * totalWeight;
             for (let i = 0; i < vocabulary.length; i++) {
                 random -= weights[i];
-                if (random <= 0) return vocabulary[i];
+                if (random <= 0) {
+                    return vocabulary[i];
+                }
             }
             return vocabulary[vocabulary.length - 1];
         }
@@ -694,7 +716,9 @@
             const options = getRandomMeanings(currentQuestion.meaning);
             correctAnswerIndex = Math.floor(Math.random() * 4);
             options.splice(correctAnswerIndex, 0, currentQuestion.meaning);
-            document.getElementById('question').textContent = `${currentQuestion.word}`;document.getElementById('question').style.fontWeight = 'bold';document.getElementById('question').style.fontSize = '40px';
+            document.getElementById('question').textContent = `${currentQuestion.word}`;
+            document.getElementById('question').style.fontWeight = 'bold';
+            document.getElementById('question').style.fontSize = '40px';
             const optionButtons = document.getElementsByClassName('option');
             for (let i = 0; i < optionButtons.length; i++) {
                 optionButtons[i].textContent = options[i].toLowerCase();
@@ -712,7 +736,7 @@
                 currentStreak++;
                 if (currentStreak > recordStreak) {
                     recordStreak = currentStreak;
-                    localStorage.setItem('recordStreak', recordStreak);
+                    saveData(); // recordStreak değiştiğinde kaydet
                 }
             } else {
                 resultDiv.textContent = `Wrong! The correct answer is "${currentQuestion.meaning}".`;
