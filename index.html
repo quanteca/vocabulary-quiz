@@ -108,6 +108,10 @@
             background: rgba(0,0,0,0.5);
             z-index: 999;
         }
+        #streak {
+            margin-top: 10px;
+            font-size: 18px;
+        }
     </style>
 </head>
 <body>
@@ -135,6 +139,10 @@
             <button class="option" onclick="checkAnswer(2)"></button>
             <button class="option" onclick="checkAnswer(3)"></button>
             <div id="result"></div>
+            <div id="streak">
+                Current Streak: <span id="currentStreak">0</span><br>
+                RECORD: <span id="recordStreak">0</span>
+            </div>
         </div>
         <div id="inputSection">
             <button onclick="promptPassword('import')">Import and Fetch Meanings</button>
@@ -158,6 +166,14 @@
     <div id="editSection" style="display:none;">
         <h2>View and Edit Vocabulary</h2>
         <button class="resetAllButton" onclick="resetAllScores()">Reset All Scores</button>
+        <button onclick="saveChanges()">Save Changes</button>
+        <button onclick="returnToMain()">Cancel</button>
+        <br>
+        <label for="sortOrder">Sort by:</label>
+        <select id="sortOrder" onchange="showEditSection()">
+            <option value="newest">Newest First</option>
+            <option value="alpha">Alphabetical</option>
+        </select>
         <table id="editTable">
             <thead>
                 <tr>
@@ -169,9 +185,6 @@
             </thead>
             <tbody id="editTableBody"></tbody>
         </table>
-        <br>
-        <button onclick="saveChanges()">Save Changes</button>
-        <button onclick="returnToMain()">Cancel</button>
     </div>
     <div id="changePasswordSection" style="display:none;">
         <h2>Change Password</h2>
@@ -182,8 +195,8 @@
     </div>
 
     <script>
-        const supabaseUrl = 'https://otklktvfvbgozfvacxid.supabase.co'; // Kendi URL'nizi buraya
-        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90a2xrdHZmdmJnb3pmdmFjeGlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgxODQ4NDUsImV4cCI6MjA3Mzc2MDg0NX0.78l8yQOOPlgXMogYmu3p3MK_2gReG7gvg6LK4UNtthQ'; // Kendi key'inizi buraya
+        const supabaseUrl = 'https://otklktvfvbgozfvacxid.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90a2xrdHZmdmJnb3pmdmFjeGlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgxODQ4NDUsImV4cCI6MjA3Mzc2MDg0NX0.78l8yQOOPlgXMogYmu3p3MK_2gReG7gvg6LK4UNtthQ';
         const proxyUrl = 'https://cors-anywhere.herokuapp.com/';
         let supabaseClient = null;
         let currentUserId = null;
@@ -206,6 +219,8 @@
         let correctAnswerIndex = null;
         let currentAction = null;
         let password = '';
+        let currentStreak = 0;
+        let recordStreak = parseInt(localStorage.getItem('recordStreak')) || 0;
 
         async function getCurrentUserId() {
             if (!supabaseClient) {
@@ -302,17 +317,13 @@
                     ]);
                     password = '8006';
                 }
-                vocabulary = vocabulary.map(word => {
-                    const correct = word.correct || 0;
-                    const incorrect = word.incorrect || 0;
-                    const usage = word.usage || (correct + incorrect); // Retroaktif hesaplama: Mevcut verilerde usage yoksa correct + incorrect olarak ayarla
-                    return {
-                        ...word,
-                        correct,
-                        incorrect,
-                        usage
-                    };
-                });
+                vocabulary = vocabulary.map(word => ({
+                    ...word,
+                    correct: word.correct || 0,
+                    incorrect: word.incorrect || 0,
+                    usage: word.usage || 0,
+                    addedAt: word.addedAt || Date.now() - Math.random() * 1000000000 // Retroaktif timestamp
+                }));
                 if (vocabulary.length > 0) {
                     document.getElementById('quizSection').style.display = 'block';
                     nextQuestion();
@@ -408,11 +419,15 @@
         }
 
         function showEditSection() {
+            const sortOrder = document.getElementById('sortOrder').value;
             const tableBody = document.getElementById('editTableBody');
             tableBody.innerHTML = '';
-            const sortedVocabulary = [...vocabulary].sort((a, b) => 
-                a.word.toLowerCase().localeCompare(b.word.toLowerCase())
-            );
+            let sortedVocabulary = [...vocabulary];
+            if (sortOrder === 'newest') {
+                sortedVocabulary.sort((a, b) => b.addedAt - a.addedAt);
+            } else if (sortOrder === 'alpha') {
+                sortedVocabulary.sort((a, b) => a.word.toLowerCase().localeCompare(b.word.toLowerCase()));
+            }
             sortedVocabulary.forEach((item, index) => {
                 const row = document.createElement('tr');
                 row.innerHTML = `
@@ -474,7 +489,8 @@
                         meaning,
                         correct: vocabulary[i].correct || 0,
                         incorrect: vocabulary[i].incorrect || 0,
-                        usage: vocabulary[i].usage || 0
+                        usage: vocabulary[i].usage || 0,
+                        addedAt: vocabulary[i].addedAt
                     });
                 }
             }
@@ -554,7 +570,7 @@
                 if (meaning.includes('Meaning not found')) {
                     errorWords.push(word);
                 } else {
-                    vocabulary.push({ word, meaning, correct: 0, incorrect: 0, usage: 0 });
+                    vocabulary.push({ word, meaning, correct: 0, incorrect: 0, usage: 0, addedAt: Date.now() });
                     addedCount++;
                 }
             }
@@ -613,7 +629,8 @@
                             meaning: item.meaning.toLowerCase().replace(/[^a-zçğıöşü\s',]/g, ''),
                             correct: item.correct || 0,
                             incorrect: item.incorrect || 0,
-                            usage: item.usage || ( (item.correct || 0) + (item.incorrect || 0) )
+                            usage: (item.correct || 0) + (item.incorrect || 0),
+                            addedAt: item.addedAt || Date.now()
                         });
                         addedCount++;
                     }
@@ -655,35 +672,16 @@
 
         function getWeightedRandomWord() {
             const weights = vocabulary.map(word => {
-                // Temel: Yanlışlar ağırlığı artırır
-                let baseWeight = Math.max(1, (word.incorrect + 1) - word.correct);
-                
-                // Yeni: Hiç sorulmamışları (usage=0) ekstra boost ver (x10)
-                if (word.usage === 0) {
-                    baseWeight *= 10;  // Liste büyüklüğüne göre ayarla (küçükse x5-20)
-                } else {
-                    // Ekstra: Düşük başarı oranını cezalandır
-                    const successRate = word.usage > 0 ? word.correct / word.usage : 0;
-                    if (successRate < 0.7) {  // %70'den düşükse ekstra ağırlık
-                        baseWeight *= (1 + (1 - successRate));  // Örn: %50 başarı -> x1.5 boost
-                    }
-                }
-                
-                return Math.max(1, baseWeight);  // Minimum 1
+                const score = word.incorrect + 1;
+                return Math.max(1, score - word.correct);
             });
-            
             const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
             let random = Math.random() * totalWeight;
             for (let i = 0; i < vocabulary.length; i++) {
                 random -= weights[i];
-                if (random <= 0) {
-                    vocabulary[i].usage++;  // Seçilince usage artır
-                    return vocabulary[i];
-                }
+                if (random <= 0) return vocabulary[i];
             }
-            const last = vocabulary[vocabulary.length - 1];
-            last.usage++;
-            return last;
+            return vocabulary[vocabulary.length - 1];
         }
 
         function nextQuestion() {
@@ -696,14 +694,13 @@
             const options = getRandomMeanings(currentQuestion.meaning);
             correctAnswerIndex = Math.floor(Math.random() * 4);
             options.splice(correctAnswerIndex, 0, currentQuestion.meaning);
-            document.getElementById('question').textContent = `${currentQuestion.word}`;
-            document.getElementById('question').style.fontWeight = 'bold';
-            document.getElementById('question').style.fontSize = '40px';
+            document.getElementById('question').textContent = `${currentQuestion.word}`;document.getElementById('question').style.fontWeight = 'bold';document.getElementById('question').style.fontSize = '40px';
             const optionButtons = document.getElementsByClassName('option');
             for (let i = 0; i < optionButtons.length; i++) {
                 optionButtons[i].textContent = options[i].toLowerCase();
             }
             document.getElementById('result').textContent = '';
+            updateStreakDisplay();
         }
 
         function checkAnswer(selectedIndex) {
@@ -712,14 +709,25 @@
                 resultDiv.textContent = 'Correct!';
                 resultDiv.style.color = 'green';
                 currentQuestion.correct += 1;
+                currentStreak++;
+                if (currentStreak > recordStreak) {
+                    recordStreak = currentStreak;
+                    localStorage.setItem('recordStreak', recordStreak);
+                }
             } else {
                 resultDiv.textContent = `Wrong! The correct answer is "${currentQuestion.meaning}".`;
                 resultDiv.style.color = 'red';
                 currentQuestion.incorrect += 1;
+                currentStreak = 0;
             }
-            // Usage zaten nextQuestion'da artırıldığı için burada artırmıyoruz (toplam = correct + incorrect kalır)
+            currentQuestion.usage = currentQuestion.correct + currentQuestion.incorrect;
             saveData();
             setTimeout(nextQuestion, 2000);
+        }
+
+        function updateStreakDisplay() {
+            document.getElementById('currentStreak').textContent = currentStreak;
+            document.getElementById('recordStreak').textContent = recordStreak;
         }
 
         window.onload = async () => {
