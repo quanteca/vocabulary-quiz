@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trades.db Dilim Analizi - Tüm Dilimler</title>
+    <script src="https://cdn.jsdelivr.net/npm/sql.js@1.14.0/dist/sql-wasm.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #f8f9fa; padding: 15px; font-size: 0.9rem; }
+        .result { background: white; border-radius: 10px; padding: 20px; margin-top: 15px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+        .group-title { font-weight: 700; margin: 22px 0 10px 0; color: #0d6efd; font-size: 1.15rem; border-bottom: 2px solid #0d6efd; padding-bottom: 4px; }
+        .column-card { background: #f8f9fa; border-radius: 8px; padding: 10px; margin-bottom: 12px; height: 100%; }
+        .column-card h6 { font-weight: 700; font-size: 0.95rem; margin-bottom: 6px; }
+        .bin-table { font-size: 0.78rem; margin-bottom: 0; }
+        .bin-table th { background: #e9ecef !important; padding: 4px 6px; }
+        .bin-table td { padding: 3px 6px; vertical-align: middle; }
+        .bin-table tr { cursor: pointer; transition: all 0.15s; }
+        .bin-table tr:hover td { filter: brightness(0.92); }
+        tr.best-score > td { background-color: #198754 !important; color: #fff !important; font-weight: 700 !important; }
+        tr.worst-score > td { background-color: #dc3545 !important; color: #fff !important; font-weight: 700 !important; }
+        tr.good > td { background-color: #d1e7dd !important; }
+        tr.mid-good > td { background-color: #e8f5e9 !important; }
+        tr.neutral > td { background-color: #fff3cd !important; }
+        tr.mid-bad > td { background-color: #f8d7da !important; }
+        tr.bad > td { background-color: #f5c2c7 !important; }
+        tr.zero > td { background-color: #e9ecef !important; color: #6c757d !important; }
+        tr.selected-bin > td { outline: 3px solid #0d6efd; outline-offset: -3px; }
+        .range-inputs { display: flex; gap: 4px; margin-bottom: 6px; }
+        .range-inputs input { width: 70px; font-size: 0.75rem; padding: 2px 4px; }
+        .range-inputs button { font-size: 0.7rem; padding: 2px 6px; }
+        .combined-box { background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
+        .filter-tag { display: inline-block; background: #0d6efd; color: white; padding: 3px 10px; border-radius: 20px; margin: 2px 4px; font-size: 0.8rem; }
+        .filter-tag span { cursor: pointer; margin-left: 6px; font-weight: bold; }
+
+        #combinedResult {
+            position: sticky;
+            top: 0;
+            z-index: 1050;
+            background: #f8f9fa;
+            padding-top: 8px;
+            padding-bottom: 4px;
+            margin-left: -5px;
+            margin-right: -5px;
+            padding-left: 5px;
+            padding-right: 5px;
+        }
+        #combinedResult:empty { display: none; }
+        #combinedResult .combined-box {
+            margin-bottom: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        }
+
+        .combo-card {
+            border-left: 5px solid #0d6efd;
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 10px;
+        }
+        .combo-card.positive { border-left-color: #198754; }
+        .combo-card.negative { border-left-color: #dc3545; }
+        .combo-score { font-size: 1.35rem; font-weight: 700; }
+        .combo-tags span {
+            display: inline-block;
+            background: #e9ecef;
+            padding: 2px 8px;
+            border-radius: 12px;
+            margin: 2px 3px;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+<div class="container-fluid">
+    <h2 class="mb-3">Trades.db Dilim Analizi – Tüm Dilimler (NaN sütun bazlı)</h2>
+
+    <div class="card p-3 mb-3">
+        <input type="file" id="dbFile" accept=".db" class="form-control mb-3">
+
+        <div class="row g-2 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label mb-1">Başlangıç</label>
+                <input type="date" id="start_date" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-1">Bitiş</label>
+                <input type="date" id="end_date" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-1">Side</label>
+                <select id="side" class="form-select form-select-sm">
+                    <option value="HEPSI">HEPSİ</option>
+                    <option value="LONG">LONG</option>
+                    <option value="SHORT">SHORT</option>
+                </select>
+            </div>
+            <div class="col-md-1">
+                <label class="form-label mb-1">Dilim</label>
+                <input type="number" id="bin_count" value="10" min="2" max="40" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-1">Dilimleme Yöntemi</label>
+                <select id="bin_method" class="form-select form-select-sm">
+                    <option value="equal_width">Eşit Aralık</option>
+                    <option value="equal_count" selected>Eşit Trade Sayısı</option>
+                </select>
+            </div>
+            <div class="col-md-1">
+                <button onclick="runAnalysis()" class="btn btn-primary btn-sm w-100">Analiz Yap</button>
+            </div>
+            <div class="col-md-2">
+                <button onclick="clearSelections()" class="btn btn-outline-secondary btn-sm w-100">Seçimleri Temizle</button>
+            </div>
+        </div>
+
+        <div class="row g-2 align-items-end mt-3">
+            <div class="col-md-2">
+                <label class="form-label mb-1">Birleştirme Sayısı</label>
+                <input type="number" id="combine_n" value="2" min="2" max="3" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-1">Eşik Değeri</label>
+                <input type="number" id="threshold" value="25" step="1" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-1">Min. Trade Sayısı</label>
+                <input type="number" id="min_trades" value="10" min="1" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-6">
+                <div class="small text-muted mt-3">
+                    Her sütun kendi NaN’lerini yok sayar. Kombinasyonda sadece o kombinasyondaki tüm sütunlarda değeri olan satırlar kullanılır.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="status"></div>
+    <div id="combinedResult"></div>
+    <div id="autoResults"></div>
+    <div id="result" class="result"></div>
+</div>
+
+<script>
+let db = null;
+let allRows = [];
+let selectedBins = {};
+let columnRangeFilters = {};
+
+const m_columns = ['m_1h','m_4h','m_12h','m_1d','m_3d','m_7d'];
+const c_columns = ['c_1h','c_4h','c_12h','c_1d','c_3d','c_7d'];
+const other_columns = ['expcoe','expcoe3d','avevolratio','quantity','volu'];
+const allColumns = [...m_columns, ...c_columns, ...other_columns];
+
+document.getElementById('dbFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    document.getElementById('status').innerHTML = '<div class="alert alert-info py-2">Yükleniyor...</div>';
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const SQL = await window.initSqlJs({ locateFile: f => `https://cdn.jsdelivr.net/npm/sql.js@1.14.0/dist/${f}` });
+        db = new SQL.Database(new Uint8Array(arrayBuffer));
+        document.getElementById('status').innerHTML = `<div class="alert alert-success py-2">✅ ${file.name} yüklendi.</div>`;
+    } catch (err) {
+        document.getElementById('status').innerHTML = `<div class="alert alert-danger py-2">Hata: ${err.message}</div>`;
+    }
+});
+
+async function runAnalysis() {
+    if (!db) return alert("Önce trades.db dosyasını seçin!");
+    selectedBins = {};
+    updateCombinedBox();
+    document.getElementById('autoResults').innerHTML = '';
+
+    const startDate = document.getElementById('start_date').value;
+    const endDate = document.getElementById('end_date').value;
+    const sideFilter = document.getElementById('side').value;
+    const binCount = parseInt(document.getElementById('bin_count').value) || 10;
+
+    let query = `SELECT * FROM trades WHERE status = 'CLOSED'`;
+    if (startDate) query += ` AND timestamp >= strftime('%s', '${startDate} 00:00:00')`;
+    if (endDate) query += ` AND timestamp <= strftime('%s', '${endDate} 23:59:59')`;
+
+    const res = db.exec(query);
+    allRows = res.length > 0 ? res[0].values.map(row => {
+        let obj = {};
+        res[0].columns.forEach((c, i) => obj[c] = row[i]);
+        return obj;
+    }) : [];
+
+    if (sideFilter !== "HEPSI") {
+        allRows = allRows.filter(r => r.side === sideFilter);
+    }
+
+    renderAllCards(binCount, sideFilter);
+    runAutoSearch(binCount);
+}
+
+function getBinMethod() {
+    return document.getElementById('bin_method').value;
+}
+
+function getBinsForColumn(col, rows, binCount) {
+    const method = getBinMethod();
+    const userMin = columnRangeFilters[col]?.min;
+    const userMax = columnRangeFilters[col]?.max;
+
+    // Sadece BU sütunda geçerli değeri olan satırlar
+    let validRows = rows.filter(r => {
+        const v = parseFloat(r[col]);
+        if (isNaN(v)) return false;
+        if (userMin !== null && userMin !== undefined && !isNaN(userMin) && v < userMin) return false;
+        if (userMax !== null && userMax !== undefined && !isNaN(userMax) && v > userMax) return false;
+        return true;
+    });
+
+    if (validRows.length === 0) return [];
+
+    const sorted = validRows
+        .map(r => ({ row: r, v: parseFloat(r[col]) }))
+        .sort((a, b) => a.v - b.v);
+
+    const min = sorted[0].v;
+    const max = sorted[sorted.length - 1].v;
+
+    if (min === max) {
+        return [{ from: min, to: max, count: validRows.length, score: calculateSuccessScore(validRows), index: 0 }];
+    }
+
+    let bins = [];
+    if (method === 'equal_count') {
+        const n = sorted.length;
+        const baseSize = Math.floor(n / binCount);
+        const remainder = n % binCount;
+        let startIdx = 0;
+        for (let i = 0; i < binCount; i++) {
+            const size = baseSize + (i < remainder ? 1 : 0);
+            if (size === 0) {
+                bins.push({ from: min, to: min, count: 0, score: 0, index: i });
+                continue;
+            }
+            const endIdx = startIdx + size;
+            const slice = sorted.slice(startIdx, endIdx);
+            const from = slice[0].v;
+            const to = slice[slice.length - 1].v;
+            const group = slice.map(x => x.row);
+            bins.push({ from, to, count: group.length, score: calculateSuccessScore(group), index: i });
+            startIdx = endIdx;
+        }
+    } else {
+        const range = max - min;
+        const step = range / binCount;
+        for (let i = 0; i < binCount; i++) {
+            const from = min + i * step;
+            const to = (i === binCount - 1) ? max : min + (i + 1) * step;
+            const group = validRows.filter(r => {
+                const v = parseFloat(r[col]);
+                if (i === binCount - 1) return v >= from && v <= to;
+                return v >= from && v < to;
+            });
+            bins.push({ from, to, count: group.length, score: calculateSuccessScore(group), index: i });
+        }
+    }
+    return bins;
+}
+
+function renderAllCards(binCount, sideFilter) {
+    const method = getBinMethod();
+    const methodLabel = method === 'equal_count' ? 'Eşit Trade Sayısı' : 'Eşit Aralık';
+    let html = `<h5 class="mb-3">Toplam Trade: <strong>${allRows.length}</strong> | Side: ${sideFilter} | Dilim: ${binCount} | Yöntem: <strong>${methodLabel}</strong></h5>`;
+
+    html += `<div class="group-title">m_ Sütunları (Piyasa)</div><div class="row g-2">`;
+    m_columns.forEach(col => {
+        html += `<div class="col">${createBinCard(col, allRows, binCount)}</div>`;
+    });
+    html += `</div>`;
+
+    html += `<div class="group-title">c_ Sütunları (Coin)</div><div class="row g-2">`;
+    c_columns.forEach(col => {
+        html += `<div class="col">${createBinCard(col, allRows, binCount)}</div>`;
+    });
+    html += `</div>`;
+
+    html += `<div class="group-title">Diğer Sütunlar</div><div class="row g-2">`;
+    other_columns.forEach(col => {
+        html += `<div class="col-md-4 col-lg-3">${createBinCard(col, allRows, binCount)}</div>`;
+    });
+    html += `</div>`;
+
+    document.getElementById('result').innerHTML = html;
+}
+
+function createBinCard(col, rows, binCount) {
+    const bins = getBinsForColumn(col, rows, binCount);
+
+    if (bins.length === 0) {
+        return `
+            <div class="column-card">
+                <h6>${col}</h6>
+                ${createRangeInputs(col)}
+                <p class="text-muted small">Bu aralıkta veri yok</p>
+            </div>`;
+    }
+
+    const withCount = bins.filter(b => b.count > 0);
+    const min = withCount.length ? withCount[0].from : bins[0].from;
+    const max = withCount.length ? withCount[withCount.length - 1].to : bins[bins.length - 1].to;
+
+    if (bins.length === 1 && bins[0].from === bins[0].to) {
+        return `
+            <div class="column-card">
+                <h6>${col}</h6>
+                ${createRangeInputs(col)}
+                <small class="text-muted">Tüm değerler: ${bins[0].from.toFixed(3)}</small>
+                <table class="table table-sm bin-table mt-1">
+                    <tr><td>Trade</td><td>${bins[0].count}</td></tr>
+                    <tr><td>Score</td><td><strong>${bins[0].score.toFixed(1)}</strong></td></tr>
+                </table>
+            </div>`;
+    }
+
+    let bestIdx = -1, worstIdx = -1;
+    let bestS = -Infinity, worstS = Infinity;
+    bins.forEach((b, i) => {
+        if (b.count > 0) {
+            if (b.score > bestS) { bestS = b.score; bestIdx = i; }
+            if (b.score < worstS) { worstS = b.score; worstIdx = i; }
+        }
+    });
+
+    let tableRows = bins.map((b, i) => {
+        let cls = '';
+        if (b.count === 0) cls = 'zero';
+        else if (i === bestIdx) cls = 'best-score';
+        else if (i === worstIdx) cls = 'worst-score';
+        else cls = getScoreClass(b.score);
+
+        if (selectedBins[col] &&
+            Math.abs(selectedBins[col].from - b.from) < 1e-9 &&
+            Math.abs(selectedBins[col].to - b.to) < 1e-9) {
+            cls += ' selected-bin';
+        }
+
+        return `
+            <tr class="${cls}" onclick="toggleBin('${col}', ${b.from}, ${b.to}, '${b.from.toFixed(3)} → ${b.to.toFixed(3)}')">
+                <td style="white-space:nowrap">${b.from.toFixed(3)}→${b.to.toFixed(3)}</td>
+                <td>${b.count}</td>
+                <td><strong>${b.count > 0 ? b.score.toFixed(1) : '-'}</strong></td>
+            </tr>`;
+    }).join('');
+
+    return `
+        <div class="column-card">
+            <h6>${col}</h6>
+            ${createRangeInputs(col)}
+            <small class="text-muted">Min:${min.toFixed(3)} Max:${max.toFixed(3)} | Geçerli: ${withCount.reduce((a,b)=>a+b.count,0)}</small>
+            <table class="table table-sm bin-table mt-1">
+                <thead>
+                    <tr>
+                        <th style="width:55%">Aralık</th>
+                        <th>Adet</th>
+                        <th>Score</th>
+                    </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
+            </table>
+        </div>`;
+}
+
+function createRangeInputs(col) {
+    const currentMin = columnRangeFilters[col]?.min ?? '';
+    const currentMax = columnRangeFilters[col]?.max ?? '';
+    return `
+        <div class="range-inputs">
+            <input type="number" step="any" placeholder="Min" id="min_${col}" value="${currentMin}"
+                   onchange="updateColumnRange('${col}')" onkeyup="if(event.key==='Enter') updateColumnRange('${col}')">
+            <input type="number" step="any" placeholder="Max" id="max_${col}" value="${currentMax}"
+                   onchange="updateColumnRange('${col}')" onkeyup="if(event.key==='Enter') updateColumnRange('${col}')">
+            <button class="btn btn-outline-primary btn-sm" onclick="updateColumnRange('${col}')">Uygula</button>
+        </div>`;
+}
+
+function updateColumnRange(col) {
+    const minVal = document.getElementById(`min_${col}`)?.value;
+    const maxVal = document.getElementById(`max_${col}`)?.value;
+    columnRangeFilters[col] = {
+        min: (minVal === '' || minVal === null) ? null : parseFloat(minVal),
+        max: (maxVal === '' || maxVal === null) ? null : parseFloat(maxVal)
+    };
+    const binCount = parseInt(document.getElementById('bin_count').value) || 10;
+    const sideFilter = document.getElementById('side').value;
+    renderAllCards(binCount, sideFilter);
+}
+
+function getScoreClass(score) {
+    if (score >= 40) return 'good';
+    if (score >= 15) return 'mid-good';
+    if (score >= -15) return 'neutral';
+    if (score >= -40) return 'mid-bad';
+    return 'bad';
+}
+
+function calculateSuccessScore(group) {
+    if (group.length === 0) return 0;
+    const tp = group.filter(r => r.exit_reason === 'TP').length;
+    const liq = group.filter(r => r.exit_reason === 'LIQ').length;
+    return (tp * 100 + liq * -100) / group.length;
+}
+
+function toggleBin(col, from, to, label) {
+    if (selectedBins[col] &&
+        Math.abs(selectedBins[col].from - from) < 1e-9 &&
+        Math.abs(selectedBins[col].to - to) < 1e-9) {
+        delete selectedBins[col];
+    } else {
+        selectedBins[col] = { from, to, label };
+    }
+    updateCombinedBox();
+    const binCount = parseInt(document.getElementById('bin_count').value) || 10;
+    const sideFilter = document.getElementById('side').value;
+    renderAllCards(binCount, sideFilter);
+}
+
+function updateCombinedBox() {
+    const keys = Object.keys(selectedBins);
+    const box = document.getElementById('combinedResult');
+    if (keys.length === 0) {
+        box.innerHTML = '';
+        return;
+    }
+    let filtered = [...allRows];
+    keys.forEach(col => {
+        const { from, to } = selectedBins[col];
+        filtered = filtered.filter(r => {
+            const v = parseFloat(r[col]);
+            return !isNaN(v) && v >= from && v <= to;
+        });
+    });
+    const score = calculateSuccessScore(filtered);
+    let tags = keys.map(col => {
+        return `<span class="filter-tag">${col}: ${selectedBins[col].label} <span onclick="removeBin('${col}')">×</span></span>`;
+    }).join('');
+    box.innerHTML = `
+        <div class="combined-box">
+            <strong>Birleştirilmiş Filtre (${keys.length} sütun)</strong><br>
+            ${tags}
+            <hr class="my-2">
+            <div class="d-flex gap-4 align-items-center">
+                <div><strong>Trade Sayısı:</strong> ${filtered.length}</div>
+                <div><strong>Success Score:</strong> <span style="font-size:1.4rem; font-weight:700;">${score.toFixed(2)}</span></div>
+            </div>
+        </div>`;
+}
+
+function removeBin(col) {
+    delete selectedBins[col];
+    updateCombinedBox();
+    const binCount = parseInt(document.getElementById('bin_count').value) || 10;
+    const sideFilter = document.getElementById('side').value;
+    renderAllCards(binCount, sideFilter);
+}
+
+function clearSelections() {
+    selectedBins = {};
+    updateCombinedBox();
+    const binCount = parseInt(document.getElementById('bin_count').value) || 10;
+    const sideFilter = document.getElementById('side').value;
+    renderAllCards(binCount, sideFilter);
+}
+
+/* ===================== OTOMATİK BİRLEŞTİRME ===================== */
+function runAutoSearch(binCount) {
+    const n = parseInt(document.getElementById('combine_n').value) || 2;
+    const threshold = Math.abs(parseFloat(document.getElementById('threshold').value) || 25);
+    const posT = threshold;
+    const negT = -threshold;
+    const minTrades = parseInt(document.getElementById('min_trades').value) || 1;
+
+    if (n < 2 || n > 3) {
+        document.getElementById('autoResults').innerHTML = `<div class="alert alert-warning">Birleştirme sayısı 2 veya 3 olmalı.</div>`;
+        return;
+    }
+
+    document.getElementById('status').innerHTML = `<div class="alert alert-info py-2">Tüm dilimler toplanıyor ve kombinasyonlar hesaplanıyor (N=${n})...</div>`;
+
+    // Her sütundan tüm dolu dilimleri al (sütun kendi NaN'lerini zaten yok sayıyor)
+    const allBins = [];
+    allColumns.forEach(col => {
+        const bins = getBinsForColumn(col, allRows, binCount);
+        bins.forEach((b, idx) => {
+            if (b.count > 0) {
+                allBins.push({
+                    col,
+                    from: b.from,
+                    to: b.to,
+                    label: `${b.from.toFixed(3)} → ${b.to.toFixed(3)}`,
+                    index: idx,
+                    score: b.score,
+                    count: b.count
+                });
+            }
+        });
+    });
+
+    const results = [];
+    let checked = 0;
+
+    function generate(current, startIdx) {
+        if (current.length === n) {
+            checked++;
+            const cols = current.map(s => s.col);
+            if (new Set(cols).size !== n) return;
+
+            // Kombinasyondaki TÜM sütunlarda geçerli değeri olan satırlar
+            let filtered = allRows;
+            for (const s of current) {
+                filtered = filtered.filter(r => {
+                    const v = parseFloat(r[s.col]);
+                    return !isNaN(v) && v >= s.from && v <= s.to;
+                });
+            }
+
+            if (filtered.length < minTrades) return;
+
+            const score = calculateSuccessScore(filtered);
+            if (score >= posT || score <= negT) {
+                results.push({
+                    items: current.map(s => ({
+                        col: s.col,
+                        label: s.label,
+                        index: s.index
+                    })),
+                    count: filtered.length,
+                    score
+                });
+            }
+            return;
+        }
+
+        for (let i = startIdx; i < allBins.length; i++) {
+            if (current.some(c => c.col === allBins[i].col)) continue;
+            current.push(allBins[i]);
+            generate(current, i + 1);
+            current.pop();
+        }
+    }
+
+    generate([], 0);
+
+    const positives = results
+        .filter(r => r.score >= posT)
+        .sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            return b.count - a.count;
+        });
+
+    const negatives = results
+        .filter(r => r.score <= negT)
+        .sort((a, b) => {
+            if (a.score !== b.score) return a.score - b.score;
+            return b.count - a.count;
+        });
+
+    let html = `<div class="result">`;
+    html += `<h4 class="mb-3">Otomatik Birleştirme Sonuçları
+        <small class="text-muted">(N=${n} | Eşik: ±${threshold} | Min Trade: ${minTrades})</small></h4>`;
+    html += `<p class="text-muted">Toplam dolu dilim: <strong>${allBins.length}</strong> | 
+             İncelenen: <strong>${checked.toLocaleString()}</strong> | 
+             Geçen: <strong>${results.length}</strong></p>`;
+
+    html += `<div class="group-title text-success">Pozitif Sonuçlar (≥ +${threshold}) — ${positives.length} adet</div>`;
+    if (positives.length === 0) {
+        html += `<p class="text-muted">Eşik üstü sonuç bulunamadı.</p>`;
+    } else {
+        positives.slice(0, 100).forEach((r) => {
+            const tags = r.items.map(it => `<span>${it.col}: ${it.label}</span>`).join('');
+            html += `
+                <div class="combo-card positive">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div class="combo-tags">${tags}</div>
+                        <div class="text-end">
+                            <div class="combo-score text-success">${r.score.toFixed(2)}</div>
+                            <div class="small">Trade: <strong>${r.count}</strong></div>
+                        </div>
+                    </div>
+                </div>`;
+        });
+        if (positives.length > 100) {
+            html += `<p class="text-muted small">... ve ${positives.length - 100} sonuç daha</p>`;
+        }
+    }
+
+    html += `<div class="group-title text-danger mt-4">Negatif Sonuçlar (≤ -${threshold}) — ${negatives.length} adet</div>`;
+    if (negatives.length === 0) {
+        html += `<p class="text-muted">Eşik altı sonuç bulunamadı.</p>`;
+    } else {
+        negatives.slice(0, 100).forEach((r) => {
+            const tags = r.items.map(it => `<span>${it.col}: ${it.label}</span>`).join('');
+            html += `
+                <div class="combo-card negative">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div class="combo-tags">${tags}</div>
+                        <div class="text-end">
+                            <div class="combo-score text-danger">${r.score.toFixed(2)}</div>
+                            <div class="small">Trade: <strong>${r.count}</strong></div>
+                        </div>
+                    </div>
+                </div>`;
+        });
+        if (negatives.length > 100) {
+            html += `<p class="text-muted small">... ve ${negatives.length - 100} sonuç daha</p>`;
+        }
+    }
+
+    html += `</div>`;
+    document.getElementById('autoResults').innerHTML = html;
+    document.getElementById('status').innerHTML = `<div class="alert alert-success py-2">✅ Analiz tamamlandı. ${results.length} eşik geçen kombinasyon bulundu.</div>`;
+}
+</script>
+</body>
+</html>
