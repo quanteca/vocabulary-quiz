@@ -116,6 +116,72 @@
             margin-top: 10px;
             font-size: 18px;
         }
+        #timerBar {
+            margin: 12px auto 8px;
+            width: 80%;
+            height: 10px;
+            background: #e9ecef;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        #timerFill {
+            height: 100%;
+            width: 100%;
+            background: #28a745;
+            transition: width 0.1s linear, background-color 0.3s;
+        }
+        #timerText {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        #timerText.urgent {
+            color: #dc3545;
+        }
+        #questionWrap {
+            position: relative;
+            display: inline-block;
+            max-width: 100%;
+        }
+        #adminQuickEditBtn {
+            display: none;
+            margin-left: 10px;
+            padding: 4px 10px;
+            font-size: 13px;
+            background: #0d6efd;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            vertical-align: middle;
+        }
+        #adminQuickEditBtn:hover {
+            background: #0b5ed7;
+        }
+        .option:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+        #quickEditModal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: white;
+            padding: 20px;
+            border: 1px solid #ccc;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            z-index: 1000;
+            max-width: 90%;
+            text-align: left;
+            border-radius: 8px;
+        }
+        #quickEditModal input {
+            width: 95%;
+            box-sizing: border-box;
+            margin: 6px 0 12px;
+        }
         #leaderboard {
             margin-top: 20px;
             padding: 15px;
@@ -228,7 +294,12 @@
             <span id="adminBadge">ADMIN</span>
         </div>
         <div id="quizSection" style="display:none;">
-            <h3 id="question"></h3>
+            <div id="questionWrap">
+                <h3 id="question" style="display:inline;"></h3>
+                <button id="adminQuickEditBtn" onclick="openQuickEdit()" title="Edit word & meaning">✏️ Edit</button>
+            </div>
+            <div id="timerText">10s</div>
+            <div id="timerBar"><div id="timerFill"></div></div>
             <button class="option" onclick="checkAnswer(0)"></button>
             <button class="option" onclick="checkAnswer(1)"></button>
             <button class="option" onclick="checkAnswer(2)"></button>
@@ -238,6 +309,17 @@
                 Current Streak: <span id="currentStreak">0</span><br>
                 Record: <span id="recordStreak">0</span>
             </div>
+        </div>
+
+        <div id="quickEditModal" style="display:none;">
+            <h3>Quick Edit (Admin)</h3>
+            <label>English word/phrase</label>
+            <input type="text" id="quickEditWord" placeholder="Word">
+            <label>Turkish meaning</label>
+            <input type="text" id="quickEditMeaning" placeholder="Meaning">
+            <br>
+            <button onclick="saveQuickEdit()">Save</button>
+            <button onclick="closeQuickEdit()">Cancel</button>
         </div>
         <div id="leaderboard">
             <h3>🏆 Leaderboard (Record Streak)</h3>
@@ -330,6 +412,12 @@
         let currentStreak = 0;
         let recordStreak = 0;
         let recordAchievedAt = null; // ISO timestamp when record was set
+
+        // Quiz timer (10 seconds)
+        const QUIZ_TIME_LIMIT = 10;
+        let quizTimerInterval = null;
+        let quizTimeLeft = QUIZ_TIME_LIMIT;
+        let answerLocked = false; // true after answer or timeout
 
         // Import selection state
         let importQueue = [];
@@ -1276,7 +1364,74 @@
             return vocabulary[vocabulary.length - 1];
         }
 
+        function stopQuizTimer() {
+            if (quizTimerInterval) {
+                clearInterval(quizTimerInterval);
+                quizTimerInterval = null;
+            }
+        }
+
+        function updateTimerUI() {
+            const textEl = document.getElementById('timerText');
+            const fillEl = document.getElementById('timerFill');
+            if (!textEl || !fillEl) return;
+            const secs = Math.max(0, Math.ceil(quizTimeLeft));
+            textEl.textContent = secs + 's';
+            textEl.classList.toggle('urgent', secs <= 3);
+            const pct = Math.max(0, (quizTimeLeft / QUIZ_TIME_LIMIT) * 100);
+            fillEl.style.width = pct + '%';
+            if (pct > 50) fillEl.style.background = '#28a745';
+            else if (pct > 25) fillEl.style.background = '#ffc107';
+            else fillEl.style.background = '#dc3545';
+        }
+
+        function startQuizTimer(reset = true) {
+            stopQuizTimer();
+            if (reset) {
+                quizTimeLeft = QUIZ_TIME_LIMIT;
+                answerLocked = false;
+            }
+            updateTimerUI();
+            const tick = 0.1; // seconds
+            quizTimerInterval = setInterval(() => {
+                quizTimeLeft -= tick;
+                updateTimerUI();
+                if (quizTimeLeft <= 0) {
+                    stopQuizTimer();
+                    onTimeUp();
+                }
+            }, tick * 1000);
+        }
+
+        function setOptionsEnabled(enabled) {
+            const optionButtons = document.getElementsByClassName('option');
+            for (let i = 0; i < optionButtons.length; i++) {
+                optionButtons[i].disabled = !enabled;
+            }
+        }
+
+        function onTimeUp() {
+            if (answerLocked || !currentQuestion) return;
+            answerLocked = true;
+            setOptionsEnabled(false);
+            const resultDiv = document.getElementById('result');
+            resultDiv.textContent = `Time's up! The correct answer is "${currentQuestion.meaning}".`;
+            resultDiv.style.color = 'red';
+            currentQuestion.incorrect += 1;
+            currentStreak = 0;
+            currentQuestion.usage = currentQuestion.correct + currentQuestion.incorrect;
+            userProgress[currentQuestion.word] = {
+                correct: currentQuestion.correct,
+                incorrect: currentQuestion.incorrect,
+                usage: currentQuestion.usage
+            };
+            updateStreakDisplay();
+            saveData();
+            setTimeout(nextQuestion, 2000);
+        }
+
         function nextQuestion() {
+            stopQuizTimer();
             if (vocabulary.length === 0) {
                 alert('No words available. Admin needs to import some words.');
                 document.getElementById('quizSection').style.display = 'none';
@@ -1292,12 +1447,22 @@
             const optionButtons = document.getElementsByClassName('option');
             for (let i = 0; i < optionButtons.length; i++) {
                 optionButtons[i].textContent = options[i].toLowerCase();
+                optionButtons[i].disabled = false;
             }
             document.getElementById('result').textContent = '';
+            // Admin quick-edit button
+            const editBtn = document.getElementById('adminQuickEditBtn');
+            if (editBtn) editBtn.style.display = isAdmin ? 'inline-block' : 'none';
             updateStreakDisplay();
+            startQuizTimer();
         }
 
         function checkAnswer(selectedIndex) {
+            if (answerLocked || !currentQuestion) return;
+            answerLocked = true;
+            stopQuizTimer();
+            setOptionsEnabled(false);
+
             const resultDiv = document.getElementById('result');
             if (selectedIndex === correctAnswerIndex) {
                 resultDiv.textContent = 'Correct!';
@@ -1317,12 +1482,12 @@
                 currentStreak = 0;
             }
             currentQuestion.usage = currentQuestion.correct + currentQuestion.incorrect;
-            // Keep userProgress in sync
             userProgress[currentQuestion.word] = {
                 correct: currentQuestion.correct,
                 incorrect: currentQuestion.incorrect,
                 usage: currentQuestion.usage
             };
+            updateStreakDisplay();
             saveData();
             setTimeout(nextQuestion, 2000);
         }
@@ -1330,6 +1495,77 @@
         function updateStreakDisplay() {
             document.getElementById('currentStreak').textContent = currentStreak;
             document.getElementById('recordStreak').textContent = recordStreak;
+        }
+
+        // ---------- Admin quick edit on quiz screen ----------
+        function openQuickEdit() {
+            if (!isAdmin || !currentQuestion) return;
+            stopQuizTimer(); // pause timer while editing
+            document.getElementById('quickEditWord').value = currentQuestion.word;
+            document.getElementById('quickEditMeaning').value = currentQuestion.meaning;
+            document.getElementById('modalOverlay').style.display = 'block';
+            document.getElementById('quickEditModal').style.display = 'block';
+        }
+
+        function closeQuickEdit() {
+            document.getElementById('modalOverlay').style.display = 'none';
+            document.getElementById('quickEditModal').style.display = 'none';
+            // Resume remaining time if answer not yet locked
+            if (!answerLocked && currentQuestion) {
+                startQuizTimer(false);
+            }
+        }
+
+        async function saveQuickEdit() {
+            if (!isAdmin || !currentQuestion) return;
+            const newWord = document.getElementById('quickEditWord').value.trim();
+            const newMeaning = cleanMeaning(document.getElementById('quickEditMeaning').value.trim());
+            if (!newWord || !newMeaning) {
+                alert('Word and meaning cannot be empty.');
+                return;
+            }
+            const oldWord = currentQuestion.word;
+
+            // Update master list
+            const masterIdx = masterVocabulary.findIndex(v => v.word === oldWord);
+            if (masterIdx >= 0) {
+                masterVocabulary[masterIdx].word = newWord;
+                masterVocabulary[masterIdx].meaning = newMeaning;
+            }
+
+            // Migrate progress key if word text changed
+            if (oldWord !== newWord) {
+                if (userProgress[oldWord]) {
+                    userProgress[newWord] = userProgress[oldWord];
+                    delete userProgress[oldWord];
+                }
+            }
+
+            // Update current question + effective vocabulary
+            currentQuestion.word = newWord;
+            currentQuestion.meaning = newMeaning;
+            buildEffectiveVocabulary();
+            // Keep the same currentQuestion reference scores in the rebuilt list
+            const rebuilt = vocabulary.find(v => v.word === newWord);
+            if (rebuilt) {
+                currentQuestion = rebuilt;
+            }
+
+            document.getElementById('question').textContent = newWord;
+            // Update option buttons: replace old correct meaning text if visible
+            const optionButtons = document.getElementsByClassName('option');
+            for (let i = 0; i < optionButtons.length; i++) {
+                if (i === correctAnswerIndex) {
+                    optionButtons[i].textContent = newMeaning.toLowerCase();
+                }
+            }
+
+            await saveData();
+            document.getElementById('modalOverlay').style.display = 'none';
+            document.getElementById('quickEditModal').style.display = 'none';
+            alert('Word/meaning updated for everyone.');
+            // Resume remaining time
+            if (!answerLocked) startQuizTimer(false);
         }
 
         window.onload = async () => {
