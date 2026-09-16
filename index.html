@@ -200,11 +200,18 @@
     </div>
 
     <div id="authSection" style="display:block;">
-        <h2>Login</h2>
+        <h2 id="authTitle">Login</h2>
         <input type="email" id="emailInput" placeholder="Enter email">
-        <input type="password" id="loginPasswordInput" placeholder="Enter login password">
+        <input type="password" id="loginPasswordInput" placeholder="Enter password">
         <br>
-        <button onclick="signIn()">Login</button>
+        <button id="authSubmitBtn" onclick="signIn()">Login</button>
+        <p id="authToggleText" style="margin-top:16px;font-size:14px;">
+            Don't have an account?
+            <a href="#" id="authToggleLink" onclick="toggleAuthMode(event)" style="color:#0d6efd;">Register</a>
+        </p>
+        <p id="authHint" style="font-size:12px;color:#666;display:none;">
+            After registering you will choose a nickname and join the quiz.
+        </p>
     </div>
 
     <div id="nicknameSection" style="display:none;">
@@ -400,6 +407,31 @@
             }
         }
 
+        let authMode = 'login'; // 'login' | 'register'
+
+        function toggleAuthMode(e) {
+            if (e) e.preventDefault();
+            if (authMode === 'login') {
+                authMode = 'register';
+                document.getElementById('authTitle').textContent = 'Register';
+                document.getElementById('authSubmitBtn').textContent = 'Create Account';
+                document.getElementById('authSubmitBtn').onclick = signUp;
+                document.getElementById('authToggleText').innerHTML =
+                    'Already have an account? <a href="#" id="authToggleLink" onclick="toggleAuthMode(event)" style="color:#0d6efd;">Login</a>';
+                document.getElementById('authHint').style.display = 'block';
+            } else {
+                authMode = 'login';
+                document.getElementById('authTitle').textContent = 'Login';
+                document.getElementById('authSubmitBtn').textContent = 'Login';
+                document.getElementById('authSubmitBtn').onclick = signIn;
+                document.getElementById('authToggleText').innerHTML =
+                    'Don\'t have an account? <a href="#" id="authToggleLink" onclick="toggleAuthMode(event)" style="color:#0d6efd;">Register</a>';
+                document.getElementById('authHint').style.display = 'none';
+            }
+            document.getElementById('emailInput').value = '';
+            document.getElementById('loginPasswordInput').value = '';
+        }
+
         async function signIn() {
             const email = document.getElementById('emailInput').value.trim();
             const loginPassword = document.getElementById('loginPasswordInput').value;
@@ -422,6 +454,45 @@
                 await loadData(data.user.id);
             } catch (error) {
                 alert('Unexpected login error: ' + error.message);
+            }
+        }
+
+        async function signUp() {
+            const email = document.getElementById('emailInput').value.trim();
+            const loginPassword = document.getElementById('loginPasswordInput').value;
+            if (!email || !loginPassword) {
+                alert('Please enter email and password.');
+                return;
+            }
+            if (loginPassword.length < 6) {
+                alert('Password must be at least 6 characters.');
+                return;
+            }
+            try {
+                const { data, error } = await supabaseClient.auth.signUp({
+                    email,
+                    password: loginPassword
+                });
+                if (error) {
+                    alert('Registration failed: ' + error.message);
+                    return;
+                }
+                if (!data?.user) {
+                    alert('Registration failed: No user data returned.');
+                    return;
+                }
+                // If email confirmation is required, session may be null
+                if (!data.session) {
+                    alert('Account created! Please check your email to confirm, then log in.');
+                    toggleAuthMode(); // switch back to login
+                    return;
+                }
+                currentUserId = data.user.id;
+                document.getElementById('authSection').style.display = 'none';
+                // New user → loadData will create row and ask for nickname
+                await loadData(data.user.id);
+            } catch (error) {
+                alert('Unexpected registration error: ' + error.message);
             }
         }
 
