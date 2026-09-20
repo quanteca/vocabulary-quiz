@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trades.db Dilim Analizi - Tüm Dilimler</title>
+    <title>Trades.db Dilim Analizi – Tüm Dilimler</title>
     <script src="https://cdn.jsdelivr.net/npm/sql.js@1.14.0/dist/sql-wasm.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
@@ -120,16 +120,27 @@
                 <input type="number" id="combine_n" value="2" min="2" max="3" class="form-control form-control-sm">
             </div>
             <div class="col-md-2">
-                <label class="form-label mb-1">Eşik Değeri</label>
+                <label class="form-label mb-1">Eşik Değeri (Score)</label>
                 <input type="number" id="threshold" value="25" step="1" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-1">Profit Eşik</label>
+                <input type="number" id="profit_threshold" value="0" step="1" class="form-control form-control-sm">
             </div>
             <div class="col-md-2">
                 <label class="form-label mb-1">Min. Trade Sayısı</label>
                 <input type="number" id="min_trades" value="10" min="1" class="form-control form-control-sm">
             </div>
-            <div class="col-md-6">
+            <div class="col-md-2">
+                <label class="form-label mb-1">Sıralama</label>
+                <select id="sort_method" class="form-select form-select-sm">
+                    <option value="score" selected>Success Score</option>
+                    <option value="profit">Profit</option>
+                </select>
+            </div>
+            <div class="col-md-2">
                 <div class="small text-muted mt-3">
-                    Her sütun kendi NaN’lerini yok sayar. Kombinasyonda sadece o kombinasyondaki tüm sütunlarda değeri olan satırlar kullanılır.
+                    Profit = Score × Trade
                 </div>
             </div>
         </div>
@@ -205,7 +216,6 @@ function getBinsForColumn(col, rows, binCount) {
     const userMin = columnRangeFilters[col]?.min;
     const userMax = columnRangeFilters[col]?.max;
 
-    // Sadece BU sütunda geçerli değeri olan satırlar
     let validRows = rows.filter(r => {
         const v = parseFloat(r[col]);
         if (isNaN(v)) return false;
@@ -472,9 +482,11 @@ function clearSelections() {
 function runAutoSearch(binCount) {
     const n = parseInt(document.getElementById('combine_n').value) || 2;
     const threshold = Math.abs(parseFloat(document.getElementById('threshold').value) || 25);
+    const profitThreshold = Math.abs(parseFloat(document.getElementById('profit_threshold').value) || 0);
     const posT = threshold;
     const negT = -threshold;
     const minTrades = parseInt(document.getElementById('min_trades').value) || 1;
+    const sortMethod = document.getElementById('sort_method').value;
 
     if (n < 2 || n > 3) {
         document.getElementById('autoResults').innerHTML = `<div class="alert alert-warning">Birleştirme sayısı 2 veya 3 olmalı.</div>`;
@@ -483,7 +495,6 @@ function runAutoSearch(binCount) {
 
     document.getElementById('status').innerHTML = `<div class="alert alert-info py-2">Tüm dilimler toplanıyor ve kombinasyonlar hesaplanıyor (N=${n})...</div>`;
 
-    // Her sütundan tüm dolu dilimleri al (sütun kendi NaN'lerini zaten yok sayıyor)
     const allBins = [];
     allColumns.forEach(col => {
         const bins = getBinsForColumn(col, allRows, binCount);
@@ -511,7 +522,6 @@ function runAutoSearch(binCount) {
             const cols = current.map(s => s.col);
             if (new Set(cols).size !== n) return;
 
-            // Kombinasyondaki TÜM sütunlarda geçerli değeri olan satırlar
             let filtered = allRows;
             for (const s of current) {
                 filtered = filtered.filter(r => {
@@ -523,7 +533,13 @@ function runAutoSearch(binCount) {
             if (filtered.length < minTrades) return;
 
             const score = calculateSuccessScore(filtered);
-            if (score >= posT || score <= negT) {
+            const profit = score * filtered.length;
+
+            // Score eşiği + Profit eşiği kontrolü
+            const passScore = score >= posT || score <= negT;
+            const passProfit = profit >= profitThreshold || profit <= -profitThreshold;
+
+            if (passScore && passProfit) {
                 results.push({
                     items: current.map(s => ({
                         col: s.col,
@@ -531,7 +547,8 @@ function runAutoSearch(binCount) {
                         index: s.index
                     })),
                     count: filtered.length,
-                    score
+                    score,
+                    profit
                 });
             }
             return;
@@ -547,28 +564,42 @@ function runAutoSearch(binCount) {
 
     generate([], 0);
 
+    // Sıralama
     const positives = results
-        .filter(r => r.score >= posT)
+        .filter(r => r.score >= posT && r.profit >= profitThreshold)
         .sort((a, b) => {
-            if (b.score !== a.score) return b.score - a.score;
-            return b.count - a.count;
+            if (sortMethod === 'profit') {
+                if (b.profit !== a.profit) return b.profit - a.profit;
+                return b.count - a.count;
+            } else {
+                if (b.score !== a.score) return b.score - a.score;
+                return b.count - a.count;
+            }
         });
 
     const negatives = results
-        .filter(r => r.score <= negT)
+        .filter(r => r.score <= negT && r.profit <= -profitThreshold)
         .sort((a, b) => {
-            if (a.score !== b.score) return a.score - b.score;
-            return b.count - a.count;
+            if (sortMethod === 'profit') {
+                if (a.profit !== b.profit) return a.profit - b.profit; // daha negatif profit önce
+                return b.count - a.count;
+            } else {
+                if (a.score !== b.score) return a.score - b.score;
+                return b.count - a.count;
+            }
         });
+
+    const sortLabel = sortMethod === 'profit' ? 'Profit' : 'Success Score';
 
     let html = `<div class="result">`;
     html += `<h4 class="mb-3">Otomatik Birleştirme Sonuçları
-        <small class="text-muted">(N=${n} | Eşik: ±${threshold} | Min Trade: ${minTrades})</small></h4>`;
+        <small class="text-muted">(N=${n} | Score Eşik: ±${threshold} | Profit Eşik: ±${profitThreshold} | Min Trade: ${minTrades} | Sıralama: ${sortLabel})</small></h4>`;
     html += `<p class="text-muted">Toplam dolu dilim: <strong>${allBins.length}</strong> | 
              İncelenen: <strong>${checked.toLocaleString()}</strong> | 
              Geçen: <strong>${results.length}</strong></p>`;
 
-    html += `<div class="group-title text-success">Pozitif Sonuçlar (≥ +${threshold}) — ${positives.length} adet</div>`;
+    // Pozitifler
+    html += `<div class="group-title text-success">Pozitif Sonuçlar (Score ≥ +${threshold} & Profit ≥ +${profitThreshold}) — ${positives.length} adet</div>`;
     if (positives.length === 0) {
         html += `<p class="text-muted">Eşik üstü sonuç bulunamadı.</p>`;
     } else {
@@ -580,7 +611,7 @@ function runAutoSearch(binCount) {
                         <div class="combo-tags">${tags}</div>
                         <div class="text-end">
                             <div class="combo-score text-success">${r.score.toFixed(2)}</div>
-                            <div class="small">Trade: <strong>${r.count}</strong></div>
+                            <div class="small">Trade: <strong>${r.count}</strong> | Profit: <strong>${r.profit.toFixed(0)}</strong></div>
                         </div>
                     </div>
                 </div>`;
@@ -590,7 +621,8 @@ function runAutoSearch(binCount) {
         }
     }
 
-    html += `<div class="group-title text-danger mt-4">Negatif Sonuçlar (≤ -${threshold}) — ${negatives.length} adet</div>`;
+    // Negatifler
+    html += `<div class="group-title text-danger mt-4">Negatif Sonuçlar (Score ≤ -${threshold} & Profit ≤ -${profitThreshold}) — ${negatives.length} adet</div>`;
     if (negatives.length === 0) {
         html += `<p class="text-muted">Eşik altı sonuç bulunamadı.</p>`;
     } else {
@@ -602,7 +634,7 @@ function runAutoSearch(binCount) {
                         <div class="combo-tags">${tags}</div>
                         <div class="text-end">
                             <div class="combo-score text-danger">${r.score.toFixed(2)}</div>
-                            <div class="small">Trade: <strong>${r.count}</strong></div>
+                            <div class="small">Trade: <strong>${r.count}</strong> | Profit: <strong>${r.profit.toFixed(0)}</strong></div>
                         </div>
                     </div>
                 </div>`;
